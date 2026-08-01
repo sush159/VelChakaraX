@@ -10,10 +10,9 @@ env/
 .env
 .env.local
 
-# Vector DB & data
+backend/chroma_db/
 chroma_db/
-data/
-
+backend/db/*.sqlite3
 # OS
 .DS_Store
 Thumbs.db
