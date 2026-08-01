@@ -286,7 +286,7 @@ def simulate(system: SystemDescription, session: Session = Depends(get_db)):
         session.add(sim)
         session.commit()
     except Exception as e:
-        print("⚠️ Failed to persist simulation:", e)
+        print("Warning: Failed to persist simulation:", e)
         session.rollback()
 
     return results
@@ -298,7 +298,7 @@ def simulate(system: SystemDescription, session: Session = Depends(get_db)):
 @app.post("/ask")
 def ask_question(data: Question, session: Session = Depends(get_db)):
 
-    print("🔥 FUNCTION CALLED")
+    print("[API] /ask endpoint called")
 
     config = load_config()
     top_k = int(config.get("top_k", 6))
@@ -396,7 +396,7 @@ def ask_question(data: Question, session: Session = Depends(get_db)):
         session.add_all([user_msg, assistant_msg])
         session.commit()
     except Exception as e:
-        print("⚠️ Failed to persist chat:", e)
+        print("Warning: Failed to persist chat:", e)
         session.rollback()
 
     # -----------------------------

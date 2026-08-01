@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { Search, X, Shield, FileText, CheckCircle2, AlertTriangle, UserCircle2 } from 'lucide-react';
 import {
   ReactFlow,
@@ -78,6 +78,18 @@ export default function AdminKnowledgeGraph() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [query, setQuery] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [nodeSearch, setNodeSearch] = useState('');
+  const [nodeSearchOpen, setNodeSearchOpen] = useState(false);
+
+  // Dim nodes that don't match the search
+  const displayNodes = nodeSearch
+    ? nodes.map(n => ({
+        ...n,
+        style: n.data.label.toLowerCase().includes(nodeSearch.toLowerCase())
+          ? {}
+          : { opacity: 0.25 },
+      }))
+    : nodes;
 
   const handleGenerate = async () => {
     if (!query.trim()) return;
@@ -196,13 +208,32 @@ export default function AdminKnowledgeGraph() {
               <h3 className="font-semibold text-slate-900">Interactive Relationship Map</h3>
               <p className="text-xs text-slate-500">Highlight connections, zoom, pan, and inspect any node.</p>
             </div>
-            <button className="flex items-center gap-2 px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50">
-              <Search className="h-3 w-3" /> Search Node
-            </button>
+            <div className="relative">
+              {nodeSearchOpen ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    type="text"
+                    value={nodeSearch}
+                    onChange={e => setNodeSearch(e.target.value)}
+                    placeholder="Search node..."
+                    className="w-40 text-xs border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  />
+                  <button onClick={() => { setNodeSearch(''); setNodeSearchOpen(false) }} className="text-xs text-slate-400 hover:text-slate-600">✕</button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setNodeSearchOpen(true)}
+                  className="flex items-center gap-2 px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50"
+                >
+                  <Search className="h-3 w-3" /> Search Node
+                </button>
+              )}
+            </div>
           </div>
           <div className="flex-1 w-full h-full mt-16">
             <ReactFlow
-              nodes={nodes}
+              nodes={displayNodes}
               edges={edges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
