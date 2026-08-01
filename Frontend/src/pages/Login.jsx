@@ -5,11 +5,15 @@ import { Link, useNavigate } from 'react-router-dom'
 export default function Login() {
   const navigate = useNavigate()
   const [showPassword, setShowPassword] = useState(false)
+  const [role, setRole] = useState('user')
 
   const handleSubmit = (event) => {
     event.preventDefault()
-    // Backend auth will be wired later. For now, route directly to chat.
-    navigate('/chat')
+    if (role === 'admin') {
+      navigate('/admin/dashboard')
+      return
+    }
+    navigate('/user/dashboard')
   }
 
   return (
@@ -24,6 +28,26 @@ export default function Login() {
         <div className="mb-7 text-center">
           <h1 className="text-3xl font-semibold tracking-tight text-slate-900">PolicyMind</h1>
           <p className="mt-2 text-sm text-slate-500">Welcome back! Please sign in to continue.</p>
+        </div>
+
+        <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-1">
+          <div className="grid grid-cols-2 gap-1">
+            {[
+              { value: 'user', label: 'User' },
+              { value: 'admin', label: 'Admin' },
+            ].map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setRole(option.value)}
+                className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
+                  role === option.value ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-white'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="space-y-4">
@@ -71,7 +95,7 @@ export default function Login() {
             Remember Me
           </label>
 
-          <Link to="/" className="text-sm font-medium text-blue-600 transition hover:text-blue-500">
+          <Link to="/login" className="text-sm font-medium text-blue-600 transition hover:text-blue-500">
             Forgot Password
           </Link>
         </div>
@@ -96,13 +120,6 @@ export default function Login() {
           <span className="text-base font-semibold text-[#DB4437]">G</span>
           Continue with Google
         </button>
-
-        <p className="mt-6 text-center text-sm text-slate-500">
-          Don't have an account?{' '}
-          <a href="#" className="font-semibold text-blue-600 transition hover:text-blue-500">
-            Create account
-          </a>
-        </p>
       </form>
     </div>
   )

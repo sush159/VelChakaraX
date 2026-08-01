@@ -1,0 +1,19 @@
+INFO:     127.0.0.1:59468 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59468 - "GET /openapi.json HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59437 - "OPTIONS /ask HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:64523 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64524 - "POST /simulate HTTP/1.1" 422 Unprocessable Content
+INFO:     127.0.0.1:56982 - "POST /simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56497 - "POST /ask HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:54380 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57047 - "POST /ask HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:59012 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59013 - "POST /simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52801 - "POST /ask HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:51538 - "OPTIONS /ask HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:63601 - "POST /ask HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:63680 - "POST /ask HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:62722 - "POST /ask HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:65527 - "OPTIONS /ask HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:62847 - "POST /ask HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:62904 - "POST /ask HTTP/1.1" 500 Internal Server Error

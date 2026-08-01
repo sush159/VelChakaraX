@@ -1,3 +1,12 @@
+import sys
+
+# Fix Windows console encoding so emoji / unicode prints don't crash
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -63,40 +72,40 @@ def simulate(system: SystemDescription):
 
 @app.post("/ask")
 def ask_question(data: Question):
+    try:
+        # -----------------------------
+        # Retrieve documents using MMR
+        # -----------------------------
+        retriever = db.as_retriever(
+            search_type="mmr",
+            search_kwargs={
+                "k": 5,
+                "fetch_k": 20
+            }
+        )
 
-    print("🔥 FUNCTION CALLED")
+        docs = retriever.invoke(data.question)
 
-    # Retrieve documents using MMR
-    retriever = db.as_retriever(
-        search_type="mmr",
-        search_kwargs={
-            "k": 5,
-            "fetch_k": 20
-        }
-    )
+        print("=" * 80)
+        print("QUESTION:", data.question)
+        print("Retrieved Chunks:", len(docs))
 
-    docs = retriever.invoke(data.question)
+        context = ""
 
-    print("=" * 80)
-    print("QUESTION:", data.question)
-    print("Retrieved Chunks:", len(docs))
+        for i, doc in enumerate(docs, start=1):
+            print(f"\n---------- CHUNK {i} ----------")
+            print(doc.page_content[:500])
+            print("-------------------------------")
 
-    context = ""
+            context += doc.page_content + "\n\n"
 
-    for i, doc in enumerate(docs, start=1):
-        print(f"\n---------- CHUNK {i} ----------")
-        print(doc.page_content[:500])
-        print("-------------------------------")
+        print("\nContext Length:", len(context))
+        print("=" * 80)
 
-        context += doc.page_content + "\n\n"
-
-    print("\nContext Length:", len(context))
-    print("=" * 80)
-
-    # -----------------------------
-    # Prompt
-    # -----------------------------
-    prompt = f"""
+        # -----------------------------
+        # Prompt
+        # -----------------------------
+        prompt = f"""
 You are an AI Policy Compliance Assistant.
 
 Answer ONLY using the context below.
@@ -124,30 +133,41 @@ Relevant Regulations:
 Recommendation:
 """
 
-    # -----------------------------
-    # Generate Response
-    # -----------------------------
-    response = ollama.chat(
-        model="llama3.2:3b",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a helpful AI Policy Compliance Assistant. "
-                    "Always answer using the provided context. "
-                    "If the context contains the answer, explain it clearly and professionally."
-                )
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
-    )
+        # -----------------------------
+        # Generate Response
+        # -----------------------------
+        response = ollama.chat(
+            model="llama3.2:3b",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a helpful AI Policy Compliance Assistant. "
+                        "Always answer using the provided context. "
+                        "If the context contains the answer, explain it clearly and professionally."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+        )
 
-    # -----------------------------
-    # Return Response
-    # -----------------------------
-    return {
-        "answer": response["message"]["content"]
-    }
+        # -----------------------------
+        # Return Response
+        # -----------------------------
+        return {
+            "answer": response["message"]["content"]
+        }
+
+    except Exception as e:
+        print(f"ERROR in /ask: {type(e).__name__}: {e}")
+
+        return {
+            "answer": (
+                "I could not generate a response due to an error.\n\n"
+                f"{type(e).__name__}: {e}"
+            )
+        }
+
