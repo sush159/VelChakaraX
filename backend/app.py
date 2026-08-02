@@ -685,3 +685,8 @@ def upload_file(file: UploadFile = File(...)):
         return {"status": "success", "message": f"{file.filename} uploaded and indexed"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to index file: {str(e)}")
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("app:app", host="0.0.0.0", port=port)
