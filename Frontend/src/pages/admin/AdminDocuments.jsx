@@ -1,4 +1,4 @@
-import { Search, UploadCloud, Eye, RefreshCw, Trash2, ChevronDown, Loader2 } from 'lucide-react'
+import { Search, UploadCloud, Eye, RefreshCw, Trash2, ChevronDown, Loader2, X } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 
 export default function AdminDocuments() {
@@ -6,7 +6,10 @@ export default function AdminDocuments() {
   const [isLoading, setIsLoading] = useState(true)
   const [isUploading, setIsUploading] = useState(false)
   const [toast, setToast] = useState(null)
-  
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState('All Categories')
+  const [categoryOpen, setCategoryOpen] = useState(false)
+  const categories = ['All Categories', 'Regulation', 'Policy', 'Risk', 'Guidance']
   const fileInputRef = useRef(null)
 
   const fetchDocuments = async () => {
@@ -76,7 +79,7 @@ export default function AdminDocuments() {
         const err = await res.json()
         showToast(`Upload failed: ${err.detail}`)
       }
-    } catch (error) {
+    } catch (_) {
       showToast("Error connecting to server")
     } finally {
       setIsUploading(false)
@@ -95,7 +98,9 @@ export default function AdminDocuments() {
     { name: 'Hiring Risk Assessment.pdf', category: 'Risk', chunks: 22, uploadedBy: 'Liam Patel', uploadDate: '2026-07-22', status: 'Processing' },
   ]
 
-  const displayDocs = documents.length > 0 ? documents : defaultDocuments
+  const displayDocs = (documents.length > 0 ? documents : defaultDocuments)
+    .filter(doc => !searchQuery || doc.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    .filter(doc => selectedCategory === 'All Categories' || doc.category === selectedCategory)
 
   return (
     <div className="max-w-6xl mx-auto relative">
@@ -113,14 +118,39 @@ export default function AdminDocuments() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <input
               type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
               placeholder="Search documents"
               className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-all placeholder:text-slate-400"
             />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
-          <button className="flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-700 text-sm font-medium hover:bg-slate-100 transition-colors">
-            All Categories
-            <ChevronDown className="h-4 w-4 text-slate-400" />
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setCategoryOpen(p => !p)}
+              className="flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-700 text-sm font-medium hover:bg-slate-100 transition-colors"
+            >
+              {selectedCategory}
+              <ChevronDown className="h-4 w-4 text-slate-400" />
+            </button>
+            {categoryOpen && (
+              <div className="absolute left-0 top-full mt-1 w-44 rounded-xl border border-slate-200 bg-white shadow-lg z-20 overflow-hidden">
+                {categories.map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => { setSelectedCategory(cat); setCategoryOpen(false) }}
+                    className={['w-full text-left px-4 py-2.5 text-sm transition hover:bg-slate-50', cat === selectedCategory ? 'font-semibold text-blue-600' : 'text-slate-700'].join(' ')}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         
         <input 

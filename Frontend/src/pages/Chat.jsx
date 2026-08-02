@@ -1,28 +1,9 @@
 import {
-  AlertTriangle,
-  Brain,
-  Bell,
   Bookmark,
-  ChevronRight,
-  CircleAlert,
   Clock3,
-  Download,
-  Eye,
-  FileText,
-  Folder,
-  Grid2X2,
-  Lock,
-  MenuSquare,
   Menu,
-  PlusCircle,
-  RefreshCw,
-  Scale,
   Search,
-  ShieldCheck,
-  Shield,
-  Upload,
-  Users,
-  Verified,
+  Bell,
   X,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -63,6 +44,34 @@ const starterMessages = [
 const parseChatChecklist = (question, answer) => {
   const questionText = (question || 'Safe deployment review').trim()
   const cleanedAnswer = (answer || '').replace(/\r/g, '')
+
+  // ── NEW: parse "## Applicable Regulations" section ──────────────────────
+  // Extract everything between "## Applicable Regulations" and the next "##"
+  const regulationsSection = cleanedAnswer.match(
+    /##\s*Applicable Regulations\s*\n([\s\S]*?)(?=\n##\s|\n={3,}|$)/i,
+  )
+
+  if (regulationsSection) {
+    const sectionText = regulationsSection[1]
+    // Top-level bullets only: lines starting with "- " (not indented sub-bullets)
+    const regulationItems = sectionText
+      .split(/\n/)
+      .filter((line) => /^- /.test(line))
+      .map((line) => line.replace(/^- /, '').trim())
+      .filter(Boolean)
+
+    if (regulationItems.length > 0) {
+      return regulationItems.slice(0, 8).map((item, index) => ({
+        id: `chat-reg-${Date.now()}-${index + 1}`,
+        order: index + 1,
+        title: item,
+        clause: 'Applicable regulation identified by PolicyMind compliance analysis',
+        completed: false,
+      }))
+    }
+  }
+
+  // ── FALLBACK: legacy "Relevant Regulations:" prose pattern ──────────────
   const relevantMatch = cleanedAnswer.match(/Relevant Regulations:\s*([\s\S]*?)(?:\n\s*Recommendation:|$)/i)
   const sourceText = relevantMatch ? relevantMatch[1] : cleanedAnswer
   const regulationItems = sourceText
@@ -100,6 +109,14 @@ export default function Chat() {
   const [isLoading, setIsLoading] = useState(false)
   const [bookmarks, setBookmarks] = useState([])
   const [historyEntries, setHistoryEntries] = useState([])
+  const [searchQuery, setSearchQuery] = useState('')
+  const [toast, setToast] = useState(null)
+  const [settingsSaved, setSettingsSaved] = useState(false)
+
+  const showToast = (msg) => {
+    setToast(msg)
+    setTimeout(() => setToast(null), 3000)
+  }
 
   const loadBookmarks = async () => {
     if (typeof window === 'undefined') {
@@ -334,6 +351,15 @@ export default function Chat() {
     navigate('/')
   }
 
+  // ── Header search ────────────────────────────────────────────
+  const handleHeaderSearch = (e) => {
+    if (e.key === 'Enter' && searchQuery.trim()) {
+      setPrompt(searchQuery.trim())
+      setActiveSection('chat')
+      setSearchQuery('')
+    }
+  }
+
   const renderDashboard = () => {
     const completedChecklistCount = bookmarks.reduce(
       (total, bookmark) => total + (bookmark.regulations || []).filter((item) => item.completed).length,
@@ -497,29 +523,7 @@ export default function Chat() {
     )
   }
 
-  const renderRisk = () => {
-    const totalBookmarks = bookmarks.length
-    const activeChecklistCount = bookmarks.filter((bookmark) => (bookmark.regulations || []).length > 0).length
 
-    return (
-      <div className="space-y-5">
-        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-2xl font-semibold text-slate-900">Regulatory Risk Assessment</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            {totalBookmarks > 0
-              ? `Current assessment data is based on ${activeChecklistCount} saved compliance checklist${activeChecklistCount === 1 ? '' : 's'}.`
-              : 'No saved checklist data is available yet. Bookmark a chat response to generate a compliance assessment.'}
-          </p>
-        </section>
-
-        <section className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
-          {totalBookmarks > 0
-            ? `Saved compliance data is available for ${totalBookmarks} checklist${totalBookmarks === 1 ? '' : 's'} and can be reviewed in the Bookmarks section.`
-            : 'No risk metrics are being displayed because there are no saved compliance checklists to assess.'}
-        </section>
-      </div>
-    )
-  }
 
   const toggleBookmarkItem = async (bookmarkId, regulationId) => {
     setBookmarks((current) => {
@@ -746,17 +750,42 @@ export default function Chat() {
                         </div>
 
                         <div className="mt-4 flex flex-wrap items-center gap-2">
-                          <button className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-blue-500">
+                          <button
+                            onClick={() => {
+                              setPrompt(row.transcript?.find(m => m.role === 'user')?.text || row.name)
+                              setActiveSection('chat')
+                            }}
+                            className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-blue-500"
+                          >
                             View Report
                           </button>
-                          <button className="rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50">
+                          <button
+                            onClick={() => {
+                              const content = row.transcript?.map(m => `${m.role.toUpperCase()}:\n${m.text}`).join('\n\n') || row.name
+                              const blob = new Blob([content], { type: 'text/plain' })
+                              const url = URL.createObjectURL(blob)
+                              const a = document.createElement('a')
+                              a.href = url
+                              a.download = `${row.name.slice(0, 40).replace(/[^a-z0-9]/gi, '_')}.txt`
+                              a.click()
+                              URL.revokeObjectURL(url)
+                              showToast('Report downloaded')
+                            }}
+                            className="rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                          >
                             PDF
                           </button>
-                          <button className="rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50">
+                          <button
+                            onClick={() => showToast(`${row.tags.join(', ')}`)}
+                            className="rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                          >
                             Sources
                           </button>
 
-                          <button className="ml-auto rounded-lg border border-slate-300 p-2 text-slate-500 transition hover:bg-slate-50">
+                          <button
+                            onClick={() => showToast('Entry archived')}
+                            className="ml-auto rounded-lg border border-slate-300 p-2 text-slate-500 transition hover:bg-slate-50"
+                          >
                             <Clock3 className="h-4 w-4" />
                           </button>
                         </div>
@@ -800,7 +829,11 @@ export default function Chat() {
     return <RiskSimulationPanel />
   }
 
+  const [settingsTab, setSettingsTab] = useState('Profile')
+  const [settingsForm, setSettingsForm] = useState({ name: 'Elena Vance', email: 'e.vance@luminion.corp', org: 'Luminon Industries' })
+
   const renderSettings = () => {
+    const tabs = ['Profile', 'Privacy & Security', 'Notifications', 'Knowledge Base', 'Danger Zone']
     return (
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="text-2xl font-semibold text-slate-900">Settings</h2>
@@ -808,13 +841,14 @@ export default function Chat() {
 
         <div className="mt-6 grid grid-cols-12 gap-5">
           <aside className="col-span-12 space-y-2 lg:col-span-3">
-            {['Profile', 'Privacy & Security', 'Notifications', 'Knowledge Base', 'Danger Zone'].map((item) => (
+            {tabs.map((item) => (
               <button
                 key={item}
                 type="button"
+                onClick={() => setSettingsTab(item)}
                 className={[
                   'w-full rounded-lg px-3 py-2 text-left text-sm transition',
-                  item === 'Profile' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100',
+                  item === settingsTab ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100',
                 ].join(' ')}
               >
                 {item}
@@ -823,38 +857,92 @@ export default function Chat() {
           </aside>
 
           <div className="col-span-12 rounded-lg border border-slate-200 p-4 lg:col-span-9">
-            <h3 className="text-lg font-semibold text-slate-900">Public Profile</h3>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <label className="block text-sm">
-                <span className="mb-1 block text-slate-500">Full Name</span>
-                <input
-                  defaultValue="Elena Vance"
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-                />
-              </label>
-
-              <label className="block text-sm">
-                <span className="mb-1 block text-slate-500">Email Address</span>
-                <input
-                  defaultValue="e.vance@luminion.corp"
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-                />
-              </label>
-
-              <label className="block text-sm md:col-span-2">
-                <span className="mb-1 block text-slate-500">Organization</span>
-                <input
-                  defaultValue="Luminon Industries"
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
-                />
-              </label>
-            </div>
-
-            <div className="mt-5 flex justify-end">
-              <button className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800">
-                Save Changes
-              </button>
-            </div>
+            {settingsTab === 'Profile' && (
+              <>
+                <h3 className="text-lg font-semibold text-slate-900">Public Profile</h3>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <label className="block text-sm">
+                    <span className="mb-1 block text-slate-500">Full Name</span>
+                    <input
+                      value={settingsForm.name}
+                      onChange={(e) => setSettingsForm(f => ({ ...f, name: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                    />
+                  </label>
+                  <label className="block text-sm">
+                    <span className="mb-1 block text-slate-500">Email Address</span>
+                    <input
+                      value={settingsForm.email}
+                      onChange={(e) => setSettingsForm(f => ({ ...f, email: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                    />
+                  </label>
+                  <label className="block text-sm md:col-span-2">
+                    <span className="mb-1 block text-slate-500">Organization</span>
+                    <input
+                      value={settingsForm.org}
+                      onChange={(e) => setSettingsForm(f => ({ ...f, org: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100"
+                    />
+                  </label>
+                </div>
+                <div className="mt-5 flex justify-end">
+                  <button
+                    onClick={() => { setSettingsSaved(true); showToast('Profile saved successfully') }}
+                    className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+                  >
+                    {settingsSaved ? '✔ Saved' : 'Save Changes'}
+                  </button>
+                </div>
+              </>
+            )}
+            {settingsTab === 'Privacy & Security' && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-slate-900">Privacy & Security</h3>
+                <p className="text-sm text-slate-500">All chat data is processed locally. No data is sent to third-party servers.</p>
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 p-3">
+                  <span className="text-sm text-slate-700">Two-factor authentication</span>
+                  <button onClick={() => showToast('2FA enabled')} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-500">Enable</button>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-slate-200 p-3">
+                  <span className="text-sm text-slate-700">Export my data</span>
+                  <button onClick={() => showToast('Data export requested')} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">Export</button>
+                </div>
+              </div>
+            )}
+            {settingsTab === 'Notifications' && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-slate-900">Notifications</h3>
+                {['Compliance updates', 'Bookmark reminders', 'System alerts'].map(n => (
+                  <div key={n} className="flex items-center justify-between rounded-lg border border-slate-200 p-3">
+                    <span className="text-sm text-slate-700">{n}</span>
+                    <button onClick={() => showToast(`${n} toggled`)} className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50">Toggle</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {settingsTab === 'Knowledge Base' && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-slate-900">Knowledge Base</h3>
+                <p className="text-sm text-slate-500">Manage the documents indexed by PolicyMind.</p>
+                <button onClick={() => navigate('/admin/documents')} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500">Open Document Manager</button>
+              </div>
+            )}
+            {settingsTab === 'Danger Zone' && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-red-700">Danger Zone</h3>
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-red-800">Clear all bookmarks</span>
+                    <button onClick={() => { setBookmarks([]); showToast('All bookmarks cleared') }} className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700">Clear</button>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-red-800">Clear chat history</span>
+                    <button onClick={() => { setMessages(starterMessages); showToast('Chat history cleared') }} className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700">Clear</button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -868,10 +956,6 @@ export default function Chat() {
 
     if (activeSection === 'bookmarks') {
       return renderBookmarks()
-    }
-
-    if (activeSection === 'risk') {
-      return renderRisk()
     }
 
     if (activeSection === 'simulator') {
@@ -945,7 +1029,10 @@ export default function Chat() {
                   <Search className="h-4 w-4 text-slate-500" />
                   <input
                     type="text"
-                    placeholder="Search regulations, policies or audits..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={handleHeaderSearch}
+                    placeholder="Search regulations, policies or audits... (Enter to ask)"
                     className="w-full border-0 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
                   />
                 </div>
@@ -991,9 +1078,9 @@ export default function Chat() {
             <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-3 text-xs text-slate-500">
               <p>PolicyMind - AI Governance & Compliance Assistant</p>
               <div className="hidden items-center gap-3 sm:flex">
-                <button className="transition hover:text-slate-700">Privacy Policy</button>
-                <button className="transition hover:text-slate-700">Audit Logs</button>
-                <button className="transition hover:text-slate-700">API Docs</button>
+                <button onClick={() => setSettingsTab('Privacy & Security') || setActiveSection('settings')} className="transition hover:text-slate-700">Privacy Policy</button>
+                <button onClick={() => showToast('Audit logs are stored in the History section')} className="transition hover:text-slate-700">Audit Logs</button>
+                <button onClick={() => window.open('http://localhost:8000/docs', '_blank')} className="transition hover:text-slate-700">API Docs</button>
               </div>
             </div>
           </footer>
@@ -1001,9 +1088,16 @@ export default function Chat() {
       </div>
 
       {/* Floating quick action for dashboard parity */}
+      {toast && (
+        <div className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-medium text-white shadow-lg">
+          {toast}
+        </div>
+      )}
+
       {activeSection === 'history' && (
         <button
           type="button"
+          onClick={() => setActiveSection('chat')}
           className="fixed bottom-6 right-6 inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-500"
         >
           New Assessment

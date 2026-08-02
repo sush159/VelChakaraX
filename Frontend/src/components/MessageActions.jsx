@@ -1,55 +1,68 @@
 import { useState } from 'react';
-import { Bookmark, Copy, ThumbsUp, ThumbsDown, FileText, Download, ExternalLink } from 'lucide-react';
+import { Bookmark, Copy, ThumbsUp, ThumbsDown, FileText, Download, ExternalLink, Check } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
 const sources = [
-  {
-    id: 1,
-    title: 'OECD AI Principles',
-    organization: 'OECD',
-    size: '2.1 MB',
-    type: 'PDF',
-  },
-  {
-    id: 2,
-    title: 'UNESCO Recommendation on the Ethics of AI',
-    organization: 'UNESCO',
-    size: '1.8 MB',
-    type: 'PDF',
-  },
-  {
-    id: 3,
-    title: 'NIST AI Risk Management Framework',
-    organization: 'NIST',
-    size: '3.4 MB',
-    type: 'PDF',
-  },
-  {
-    id: 4,
-    title: 'ISO/IEC 42001',
-    organization: 'ISO',
-    size: '2.6 MB',
-    type: 'PDF',
-  },
+  { id: 1, title: 'OECD AI Principles', organization: 'OECD', size: '2.1 MB', type: 'PDF' },
+  { id: 2, title: 'UNESCO Recommendation on the Ethics of AI', organization: 'UNESCO', size: '1.8 MB', type: 'PDF' },
+  { id: 3, title: 'NIST AI Risk Management Framework', organization: 'NIST', size: '3.4 MB', type: 'PDF' },
+  { id: 4, title: 'ISO/IEC 42001', organization: 'ISO', size: '2.6 MB', type: 'PDF' },
 ];
 
 export default function MessageActions({ message, onBookmark }) {
   const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [thumbsUp, setThumbsUp] = useState(false);
+  const [thumbsDown, setThumbsDown] = useState(false);
 
   const handleBookmark = () => {
-    if (onBookmark) {
-      onBookmark(message)
+    if (onBookmark) onBookmark(message)
+  }
+
+  const handleCopy = () => {
+    if (message?.text) {
+      navigator.clipboard.writeText(message.text).then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      })
     }
+  }
+
+  const handleThumbsUp = () => {
+    setThumbsUp(true)
+    setThumbsDown(false)
+  }
+
+  const handleThumbsDown = () => {
+    setThumbsDown(true)
+    setThumbsUp(false)
+  }
+
+  const handleDownloadAll = () => {
+    const content = sources.map(s => `${s.title} — ${s.organization} (${s.type}, ${s.size})`).join('\n')
+    const blob = new Blob([content], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'sources.txt'
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   return (
     <div className="mt-4 flex flex-wrap items-center gap-2">
       <button
         type="button"
-        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+        onClick={handleCopy}
+        className={[
+          'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition',
+          copied
+            ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',
+        ].join(' ')}
       >
-        <Copy className="h-3.5 w-3.5" />
-        Copy
+        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        {copied ? 'Copied!' : 'Copy'}
       </button>
 
       <button
@@ -63,7 +76,13 @@ export default function MessageActions({ message, onBookmark }) {
 
       <button
         type="button"
-        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+        onClick={handleThumbsUp}
+        className={[
+          'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition',
+          thumbsUp
+            ? 'border-blue-300 bg-blue-50 text-blue-700'
+            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',
+        ].join(' ')}
       >
         <ThumbsUp className="h-3.5 w-3.5" />
         Good Response
@@ -71,7 +90,13 @@ export default function MessageActions({ message, onBookmark }) {
 
       <button
         type="button"
-        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+        onClick={handleThumbsDown}
+        className={[
+          'inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition',
+          thumbsDown
+            ? 'border-red-300 bg-red-50 text-red-700'
+            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',
+        ].join(' ')}
       >
         <ThumbsDown className="h-3.5 w-3.5" />
         Bad Response
@@ -84,7 +109,7 @@ export default function MessageActions({ message, onBookmark }) {
           className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
         >
           <FileText className="h-3.5 w-3.5" />
-          Sources (4)
+          Sources ({sources.length})
         </button>
 
         <AnimatePresence>
@@ -97,7 +122,7 @@ export default function MessageActions({ message, onBookmark }) {
               className="absolute left-0 top-full z-20 mt-3 w-[360px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_24px_60px_rgba(15,23,42,0.12)]"
             >
               <div className="mb-4 flex items-center justify-between">
-                <h4 className="text-sm font-semibold text-slate-800">Sources (4)</h4>
+                <h4 className="text-sm font-semibold text-slate-800">Sources ({sources.length})</h4>
               </div>
 
               <div className="space-y-2">
@@ -116,7 +141,11 @@ export default function MessageActions({ message, onBookmark }) {
                         <p className="mt-1 text-[11px] text-slate-400">{source.type} • {source.size}</p>
                       </div>
                     </div>
-                    <button type="button" className="rounded-full p-1.5 text-slate-400 transition hover:bg-white hover:text-slate-600">
+                    <button
+                      type="button"
+                      onClick={() => window.open('http://localhost:8000/documents', '_blank')}
+                      className="rounded-full p-1.5 text-slate-400 transition hover:bg-white hover:text-slate-600"
+                    >
                       <ExternalLink className="h-3.5 w-3.5" />
                     </button>
                   </div>
@@ -125,6 +154,7 @@ export default function MessageActions({ message, onBookmark }) {
 
               <button
                 type="button"
+                onClick={handleDownloadAll}
                 className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-500"
               >
                 <Download className="h-4 w-4" />
