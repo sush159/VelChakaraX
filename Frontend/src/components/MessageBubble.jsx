@@ -1,5 +1,6 @@
 import { Bot, User } from 'lucide-react'
 import MessageActions from './MessageActions'
+import StructuredResponse from './StructuredResponse'
 
 export default function MessageBubble({ message, onBookmark }) {
   const isUser = message.role === 'user'
@@ -19,13 +20,17 @@ export default function MessageBubble({ message, onBookmark }) {
         <div className="w-full">
           <div
             className={[
-              'rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm',
+              'rounded-2xl text-sm leading-6 shadow-sm',
               isUser
-                ? 'rounded-br-md bg-blue-600 text-white'
+                ? 'rounded-br-md bg-blue-600 px-4 py-3 text-white'
                 : 'rounded-bl-md border border-slate-200 bg-white text-slate-700',
             ].join(' ')}
           >
-            {message.text}
+            {isUser ? (
+              <span className="whitespace-pre-wrap">{message.text}</span>
+            ) : (
+              <StructuredResponse text={message.text} />
+            )}
           </div>
 
           {!isUser && <MessageActions message={message} onBookmark={onBookmark} />}

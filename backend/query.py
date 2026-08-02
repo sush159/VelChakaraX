@@ -1,25 +1,31 @@
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
+from langchain_pinecone import PineconeVectorStore, PineconeEmbeddings
 
 # -----------------------------
 # Configuration
 # -----------------------------
-CHROMA_FOLDER = "chroma_db"
+PINECONE_INDEX_NAME = "policymind"
+PINECONE_EMBED_MODEL = "multilingual-e5-large"
 
 # -----------------------------
-# Load SBERT Embedding Model
-# (Must match ingest.py)
+# Connect to Pinecone (hosted inference — no local model needed)
 # -----------------------------
-embedding_model = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
+pinecone_api_key = os.environ.get("PINECONE_API_KEY")
+if not pinecone_api_key:
+    raise ValueError("PINECONE_API_KEY is not set in environment")
+
+embedding_model = PineconeEmbeddings(
+    model=PINECONE_EMBED_MODEL,
+    pinecone_api_key=pinecone_api_key,
 )
 
-# -----------------------------
-# Load Chroma Database
-# -----------------------------
-db = Chroma(
-    persist_directory=CHROMA_FOLDER,
-    embedding_function=embedding_model
+db = PineconeVectorStore(
+    index_name=PINECONE_INDEX_NAME,
+    embedding=embedding_model,
+    pinecone_api_key=pinecone_api_key,
 )
 
 print("\n==============================")

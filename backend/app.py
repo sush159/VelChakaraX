@@ -1,12 +1,21 @@
-from fastapi import FastAPI, Depends, HTTPException, Query
+import os
+import json
+import shutil
+import re
+from string import Template
+from typing import List, Optional, Any
+
+from dotenv import load_dotenv
+load_dotenv()
+
+from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional, Any
 
 from sqlalchemy.orm import Session
 
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_pinecone import PineconeVectorStore, PineconeEmbeddings
+from pinecone import Pinecone
 
 from risk_engine import SystemDescription, run_simulation
 
@@ -16,10 +25,14 @@ from db.models import (
     Bookmark, BookmarkRegulation, HistoryEntry, Document
 )
 
-import ollama
+from groq import Groq
 import datetime
-import re
-from string import Template
+
+# -----------------------------
+# Groq LLM Client
+# -----------------------------
+groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
 # -----------------------------
 # FastAPI App
@@ -28,7 +41,7 @@ app = FastAPI(title="AI Compliance Assistant")
 
 app.add_middleware(
     CORSMiddleware,
-allow_origins=[
+    allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:5174",
@@ -43,15 +56,12 @@ allow_origins=[
     allow_headers=["*"],
 )
 
-import json
-import os
-import shutil
-
 # -----------------------------
 # Configuration
 # -----------------------------
-CHROMA_FOLDER = "chroma_db"
 CONFIG_FILE = "config.json"
+PINECONE_INDEX_NAME = "policymind"
+PINECONE_EMBED_MODEL = "multilingual-e5-large"  # Pinecone-hosted, 1024-dim, no local torch needed
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -60,28 +70,45 @@ def load_config():
     return {
         "chunk_size": 512,
         "chunk_overlap": 64,
-        "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+        "embedding_model": PINECONE_EMBED_MODEL,
         "top_k": 6
     }
 
 # -----------------------------
-# Load Embedding Model and DB
+# Load Pinecone Vector Store (hosted inference — no local model)
 # -----------------------------
 global_db = None
-global_embedding_model = None
 
 def reload_vector_db():
-    global global_db, global_embedding_model
-    config = load_config()
-    global_embedding_model = HuggingFaceEmbeddings(
-        model_name=config.get("embedding_model", "sentence-transformers/all-MiniLM-L6-v2")
-    )
-    global_db = Chroma(
-        persist_directory=CHROMA_FOLDER,
-        embedding_function=global_embedding_model
-    )
+    """Connect to Pinecone using its hosted embedding API. No local model download needed."""
+    global global_db
+    pinecone_api_key = os.environ.get("PINECONE_API_KEY")
+    if not pinecone_api_key:
+        print("WARNING: PINECONE_API_KEY not set — vector search will be unavailable.")
+        return
+    try:
+        embeddings = PineconeEmbeddings(
+            model=PINECONE_EMBED_MODEL,
+            pinecone_api_key=pinecone_api_key,
+        )
+        global_db = PineconeVectorStore(
+            index_name=PINECONE_INDEX_NAME,
+            embedding=embeddings,
+            pinecone_api_key=pinecone_api_key,
+        )
+        print(f"[Pinecone] Connected to index '{PINECONE_INDEX_NAME}' using hosted model '{PINECONE_EMBED_MODEL}'")
+    except Exception as e:
+        print(f"WARNING: Could not connect to Pinecone index '{PINECONE_INDEX_NAME}': {e}")
+        print("Run 'python ingest.py' to create the index, then call /rebuild to reconnect.")
+        global_db = None
 
-# Initialize on startup
+# Initialize on startup — create DB tables then connect to Pinecone
+try:
+    Base.metadata.create_all(bind=engine)
+    print("[DB] Tables created/verified OK")
+except Exception as _db_err:
+    print(f"[DB] WARNING: Could not create tables: {_db_err}")
+
 reload_vector_db()
 
 # -----------------------------
@@ -286,7 +313,7 @@ def simulate(system: SystemDescription, session: Session = Depends(get_db)):
         session.add(sim)
         session.commit()
     except Exception as e:
-        print("⚠️ Failed to persist simulation:", e)
+        print("[WARN] Failed to persist simulation:", e)
         session.rollback()
 
     return results
@@ -298,17 +325,23 @@ def simulate(system: SystemDescription, session: Session = Depends(get_db)):
 @app.post("/ask")
 def ask_question(data: Question, session: Session = Depends(get_db)):
 
-    print("🔥 FUNCTION CALLED")
+    print("[ASK] FUNCTION CALLED")
+
+    if global_db is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Vector store not initialized. Check that PINECONE_API_KEY is set and the index exists."
+        )
 
     config = load_config()
     top_k = int(config.get("top_k", 6))
 
-    # Retrieve documents using MMR
+    # Retrieve documents from Pinecone (similarity search)
     retriever = global_db.as_retriever(
         search_type="mmr",
         search_kwargs={
             "k": top_k,
-            "fetch_k": 20
+            "fetch_k": max(top_k * 4, 20)
         }
     )
 
@@ -323,7 +356,7 @@ def ask_question(data: Question, session: Session = Depends(get_db)):
     source_meta = []
     for i, doc in enumerate(docs, start=1):
         print(f"\n---------- CHUNK {i} ----------")
-        print(doc.page_content[:500])
+        print(doc.page_content[:500].encode('ascii', 'replace').decode('ascii'))
         print("-------------------------------")
 
         context += doc.page_content + "\n\n"
@@ -345,30 +378,34 @@ def ask_question(data: Question, session: Session = Depends(get_db)):
     )
 
     # -----------------------------
-    # Generate Response
+    # Generate Response (Groq — Llama 3.2 3B)
     # -----------------------------
-    response = ollama.chat(
-        model="llama3.2:3b",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are PolicyMind, an AI Governance & Compliance Assistant. "
-                    "Follow the required output format in the user prompt exactly: all 9 '##' "
-                    "headings in order, bullet points only, no invented regulations, raw JSON "
-                    "Knowledge Graph, and strict adherence to the retrieved context. "
-                    "If information is missing from the context, state 'Not available in the "
-                    "uploaded knowledge base.' — never guess."
-                )
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
-    )
-
-    answer = response["message"]["content"]
+    try:
+        completion = groq_client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are PolicyMind, an AI Governance & Compliance Assistant.\n"
+                        "You MUST strictly follow the REQUIRED OUTPUT FORMAT.\n"
+                        "NEVER respond in a paragraph. Use bullet points ONLY.\n"
+                        "The 'Knowledge Graph' section MUST be raw JSON without markdown fences.\n"
+                        "You must include ALL 9 '##' headings."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.2,
+            max_tokens=2048,
+        )
+        answer = completion.choices[0].message.content
+    except Exception as e:
+        print("[WARN] Groq LLM call failed:", e)
+        raise HTTPException(status_code=502, detail=f"LLM request failed: {str(e)}")
 
     # -----------------------------
     # Persist the Q&A
@@ -396,7 +433,7 @@ def ask_question(data: Question, session: Session = Depends(get_db)):
         session.add_all([user_msg, assistant_msg])
         session.commit()
     except Exception as e:
-        print("⚠️ Failed to persist chat:", e)
+        print("[WARN] Failed to persist chat:", e)
         session.rollback()
 
     # -----------------------------
@@ -596,7 +633,9 @@ def list_documents(session: Session = Depends(get_db)):
             "totalChunks": d.total_chunks,
             "ingestedAt": d.ingested_at.isoformat(),
         }
+        for d in docs
     ]
+
 
 # -----------------------------
 # Settings & Ingestion
@@ -605,6 +644,7 @@ def list_documents(session: Session = Depends(get_db)):
 def get_settings():
     return load_config()
 
+
 @app.post("/settings")
 def update_settings(settings: dict):
     config = load_config()
@@ -612,6 +652,7 @@ def update_settings(settings: dict):
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=2)
     return {"status": "success", "settings": config}
+
 
 @app.post("/rebuild")
 def rebuild_vector_index():
@@ -623,20 +664,19 @@ def rebuild_vector_index():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-from fastapi import UploadFile, File
 
 @app.post("/upload")
 def upload_file(file: UploadFile = File(...)):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
-    
+
     data_dir = "data"
     os.makedirs(data_dir, exist_ok=True)
     file_path = os.path.join(data_dir, file.filename)
-    
+
     with open(file_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
-    
+
     # Automatically rebuild the index to include the new file
     try:
         from ingest import rebuild_index

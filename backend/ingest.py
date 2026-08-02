@@ -3,17 +3,23 @@ import shutil
 import sys
 import json
 
-from langchain_community.document_loaders import PyPDFLoader
+from dotenv import load_dotenv
+load_dotenv()
+
+from pypdf import PdfReader
+from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_pinecone import PineconeVectorStore, PineconeEmbeddings
+from pinecone import Pinecone, ServerlessSpec
 
 # -----------------------------
 # Configuration
 # -----------------------------
 DATA_FOLDER = "data"
-CHROMA_FOLDER = "chroma_db"
 CONFIG_FILE = "config.json"
+PINECONE_INDEX_NAME = "policymind"
+PINECONE_EMBED_MODEL = "multilingual-e5-large"  # Pinecone-hosted, 1024-dim
+PINECONE_EMBED_DIM = 1024
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -22,23 +28,30 @@ def load_config():
     return {
         "chunk_size": 500,
         "chunk_overlap": 100,
-        "embedding_model": "sentence-transformers/all-MiniLM-L6-v2"
+        "embedding_model": PINECONE_EMBED_MODEL
     }
+
+def get_pinecone_index():
+    pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
+    existing = [idx.name for idx in pc.list_indexes()]
+    if PINECONE_INDEX_NAME not in existing:
+        print(f"Creating Pinecone index '{PINECONE_INDEX_NAME}' (dim={PINECONE_EMBED_DIM})...")
+        pc.create_index(
+            name=PINECONE_INDEX_NAME,
+            dimension=PINECONE_EMBED_DIM,
+            metric="cosine",
+            spec=ServerlessSpec(cloud="aws", region="us-east-1")
+        )
+        import time
+        time.sleep(10)  # wait for index to be ready
+    return pc.Index(PINECONE_INDEX_NAME)
 
 def rebuild_index():
     print("\nStarting Index Rebuild...")
     config = load_config()
-    chunk_size = int(config.get("chunk_size", 500))
-    chunk_overlap = int(config.get("chunk_overlap", 100))
-    model_name = config.get("embedding_model", "sentence-transformers/all-MiniLM-L6-v2")
+    chunk_size = int(config.get("chunk_size", 512))
+    chunk_overlap = int(config.get("chunk_overlap", 64))
 
-    # -----------------------------
-    # Remove old ChromaDB
-    # -----------------------------
-    if os.path.exists(CHROMA_FOLDER):
-        print("Removing old ChromaDB...")
-        shutil.rmtree(CHROMA_FOLDER)
-    
     if not os.path.exists(DATA_FOLDER):
         os.makedirs(DATA_FOLDER)
 
@@ -46,88 +59,84 @@ def rebuild_index():
 
     print("\nLoading PDF files...\n")
 
-    # -----------------------------
-    # Load all PDFs
-    # -----------------------------
     for file in os.listdir(DATA_FOLDER):
         if file.lower().endswith(".pdf"):
             path = os.path.join(DATA_FOLDER, file)
             print(f"Loading: {file}")
-
-            loader = PyPDFLoader(path)
-            documents.extend(loader.load())
+            reader = PdfReader(path)
+            for i, page in enumerate(reader.pages):
+                text = page.extract_text() or ""
+                documents.append(
+                    Document(
+                        page_content=text,
+                        metadata={"source": path, "page": i + 1},
+                    )
+                )
 
     print(f"\nTotal Pages Loaded: {len(documents)}")
-    
+
     if len(documents) == 0:
         print("No documents to index.")
         return
 
-    # -----------------------------
-    # Split into smaller chunks
-    # -----------------------------
+    # Split into chunks
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         separators=["\n\n", "\n", ". ", " ", ""]
     )
-
     chunks = splitter.split_documents(documents)
-
     print(f"\nTotal Chunks Created: {len(chunks)} (Size: {chunk_size}, Overlap: {chunk_overlap})")
 
-    # -----------------------------
-    # Load Embedding Model
-    # -----------------------------
-    print(f"\nLoading Embedding Model ({model_name})...\n")
-
-    embedding_model = HuggingFaceEmbeddings(
-        model_name=model_name
+    # Use Pinecone hosted embedding — no local model download needed
+    pinecone_api_key = os.environ.get("PINECONE_API_KEY")
+    print(f"\nUsing Pinecone hosted embedding model '{PINECONE_EMBED_MODEL}'...")
+    embedding_model = PineconeEmbeddings(
+        model=PINECONE_EMBED_MODEL,
+        pinecone_api_key=pinecone_api_key,
     )
 
-    # -----------------------------
-    # Create ChromaDB
-    # -----------------------------
-    print("Creating Chroma Vector Database...\n")
+    # Connect to Pinecone and clear old vectors
+    print("Connecting to Pinecone...")
+    index = get_pinecone_index()
+    print("Clearing old vectors from Pinecone index...")
+    try:
+        index.delete(delete_all=True)
+        import time
+        time.sleep(3)  # allow deletion to propagate
+    except Exception as e:
+        print(f"Skipping delete_all due to error (index might be empty): {e}")
 
-    db = Chroma.from_documents(
+    # Upload new vectors
+    print("Uploading new vectors to Pinecone...\n")
+    PineconeVectorStore.from_documents(
         documents=chunks,
         embedding=embedding_model,
-        persist_directory=CHROMA_FOLDER
+        index_name=PINECONE_INDEX_NAME,
+        pinecone_api_key=pinecone_api_key,
     )
 
     print("\n====================================")
-    print("✅ ChromaDB created successfully!")
+    print("[SUCCESS] Pinecone index updated successfully!")
     print(f"Indexed {len(chunks)} chunks from {len(documents)} pages.")
     print("====================================\n")
 
-    # -----------------------------
-    # Record document metadata in PostgreSQL
-    # -----------------------------
+    # Save metadata to PostgreSQL
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from db.session import SessionLocal, Base, engine
-        from db.models import Document
+        from db.models import Document as DocumentRecord
         from collections import Counter
 
-        # Create tables if not already created
         Base.metadata.create_all(bind=engine)
-
         session = SessionLocal()
-        
-        # Clear existing document metadata since we rebuild
-        session.query(Document).delete()
+        session.query(DocumentRecord).delete()
 
-        # Count chunks + pages per source file
-        source_counter = Counter()
-        pages_per_source = Counter()
+        chunk_counter = Counter()
+        page_counter = Counter()
         for doc in documents:
             source = os.path.basename(doc.metadata.get("source", "unknown"))
-            source_counter[source] += 1
-            pages_per_source[source] += 0  # page count per file handled below
-
-        # More accurate per-file chunk/page counts
-        chunk_counter = Counter()
+            page_counter[source] += 1
         for chunk in chunks:
             source = os.path.basename(chunk.metadata.get("source", "unknown"))
             chunk_counter[source] += 1
@@ -135,10 +144,10 @@ def rebuild_index():
         for file in os.listdir(DATA_FOLDER):
             if not file.lower().endswith(".pdf"):
                 continue
-            record = Document(
+            record = DocumentRecord(
                 filename=file,
                 file_path=os.path.join(DATA_FOLDER, file),
-                total_pages=pages_per_source.get(file, 0),
+                total_pages=page_counter.get(file, 0),
                 total_chunks=chunk_counter.get(file, 0),
                 chunk_size=chunk_size,
                 chunk_overlap=chunk_overlap,
@@ -146,17 +155,10 @@ def rebuild_index():
             session.add(record)
 
         session.commit()
-
-        for record in session.query(Document).all():
-            print(f"  📄 {record.filename}: {record.total_chunks} chunks")
-            print(f"     ({record.file_path})")
-
         session.close()
-        print("\n✅ Document metadata saved to PostgreSQL.")
+        print("[SUCCESS] Document metadata saved to PostgreSQL.")
     except Exception as e:
-        print("\n⚠️  Could not persist document metadata to PostgreSQL.")
-        print("    Error:", e)
-        print("    (The ChromaDB vector store was still created successfully.)")
+        print(f"[WARNING] Could not persist metadata: {e}")
 
 if __name__ == "__main__":
     rebuild_index()

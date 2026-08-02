@@ -10,10 +10,15 @@ env/
 .env
 .env.local
 
-backend/chroma_db/
-chroma_db/
+# Database
 backend/db/*.sqlite3
+
+# Uploaded PDFs (do not commit training data)
+data/
+
+# Leftover local vector DB (replaced by Pinecone)
+chroma_db/
+
 # OS
 .DS_Store
 Thumbs.db
-

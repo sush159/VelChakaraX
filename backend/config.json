@@ -1,6 +1,6 @@
 {
   "chunk_size": 512,
   "chunk_overlap": 64,
-  "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "embedding_model": "multilingual-e5-large",
   "top_k": 6
 }

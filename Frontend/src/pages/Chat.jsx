@@ -47,7 +47,6 @@ const navItems = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'chat', label: 'AI Chat' },
   { id: 'bookmarks', label: 'Bookmarks' },
-  { id: 'risk', label: 'Risk Assessment' },
   { id: 'simulator', label: 'Risk Simulator' },
   { id: 'history', label: 'History' },
   { id: 'settings', label: 'Settings' },
